@@ -13,3 +13,7 @@ test/**
 
 # Local-only working notes (not part of the published project).
 docs/mcp-handoff.md
+
+# Local test/probe scripts. The published service must build, start and serve
+# tools without this directory; see AGENTS.md.
+demo_code/

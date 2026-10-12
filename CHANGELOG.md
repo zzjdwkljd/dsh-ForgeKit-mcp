@@ -8,7 +8,7 @@
 
 - 截图保留期自动清理（`src/screenshot/retention.ts`）：默认删除 3 天前的自动生成截图，修复此前 README 承诺但代码未实现的行为。
 - 新增环境变量 `MCP_SCREENSHOT_RETENTION_DAYS`（默认 `3`，`0` 关闭）与 `MCP_SCREENSHOT_RETENTION_INTERVAL_HOURS`（默认 `6`，`0` 表示仅首次截图时扫一次）。
-- `demo_code/retention-verify.mjs`（隔离夹具验证所有权判定与边界）与 `demo_code/retention-e2e.mjs`（真实 stdio 端到端）。
+- 截图保留期的隔离夹具验证与真实 stdio 端到端验证（本地测试脚本，不随仓库发布）。
 - 文档 `docs/screenshot-retention-faq.md` 记录清理范围、可证明归属的判定与验证方式。
 - 文档 `docs/dsh-install.md` 说明在 DeepSeek Harness 中通过 profile patch 层注册本服务器的完整步骤与排错要点。
 

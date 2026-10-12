@@ -27,14 +27,7 @@ npm start          # 启动 MCP 服务器 (stdio)
 npm run typecheck  # 仅类型检查，不产出文件
 ```
 
-构建后按下方「在 MCP 客户端中注册」配置客户端即可。截图保留期的隔离验证与端到端验证可直接运行：
-
-```bash
-node demo_code/retention-verify.mjs   # 隔离夹具：3 天清理边界
-node demo_code/retention-e2e.mjs      # 真实 stdio：截图 + 清理
-```
-
-验证脚本不会截图真实桌面（`retention-e2e.mjs` 会调用一次真实截图）；运行后自动清理各自的临时目录。
+构建后按下方「在 MCP 客户端中注册」配置客户端即可。
 
 扩展新功能请阅读 [模块开发指南](docs/mcp-extending.md)；命名、版本策略与架构决策见 [项目基线](docs/mcp-project-foundation.md)。
 
@@ -145,10 +138,6 @@ src/
   screenshot/              # 原生/Windows 降级后端、截图存储与保留期清理
   types.ts                 # 通用领域类型
 scripts/capture.ps1        # Windows 截图降级脚本
-
-demo_code/                 # 测试与验证脚本
-  retention-verify.mjs     # 截图保留期隔离夹具验证（3 天清理边界）
-  retention-e2e.mjs        # 截图保留期真实 stdio 端到端验证
 
 test/                      # 只存放数据，不放测试代码
   contracts/tools.v1.json  # 25 个工具的完整声明基线

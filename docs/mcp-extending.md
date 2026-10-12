@@ -79,7 +79,7 @@ export const builtinModules: readonly ToolModule[] = Object.freeze([
 
 ### 3. 补测试并更新版本
 
-1. 为新增工具补正常输入、非法输入和异常路径测试，脚本放在 `demo_code/`，并在 `package.json` 中登记对应命令。
+1. 为新增工具补正常输入、非法输入和异常路径测试。测试脚本是本地文件，不随仓库发布，见下方「测试与发布边界」。
 2. 运行 `npm run typecheck`。
 3. 工具清单变化会使契约对比测试失败，这是有意的保护，而不是应当删除的断言。
 4. 确认变更符合预期后更新 `test/contracts/tools.v1.json`，并审查差异，避免意外接受旧工具参数变更。
@@ -122,8 +122,8 @@ try {
 
 ## 测试与发布边界
 
-- `npm run typecheck`：类型检查，不产出文件。
-- `npm run test:retention` / `npm run test:retention-e2e`：截图保留期的隔离夹具验证与真实 stdio 端到端验证。
-- 测试代码放在 `demo_code/`；契约数据放在 `test/contracts/`；不要把日志或基线 JSON 放进 `docs/`。
+- `npm run typecheck`：类型检查，不产出文件。`npm run build` 编译到 `dist/`。
+- 测试与验证脚本是本地文件，不随仓库发布。`src/`、正式启动、构建和发布产物不依赖它们；删除后正式服务仍可构建、启动并调用工具。
+- 契约数据放在 `test/contracts/`；不要把日志或基线 JSON 放进 `docs/`。
 - npm 发布文件通过 `package.json.files` 白名单控制。发布前运行 `npm pack --dry-run --ignore-scripts`，确认未包含 `test/login-state/`、截图、环境文件或日志。
 - 新增依赖按实际使用引入。

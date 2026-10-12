@@ -7,9 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:retention": "node demo_code/retention-verify.mjs",
-    "test:retention-e2e": "node demo_code/retention-e2e.mjs"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [
     "mcp",
