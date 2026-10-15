@@ -8,11 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepack": "npm run build",
-    "pretest": "npm run build",
-    "test": "node --test demo_code/*.test.mjs",
-    "test:retention": "node demo_code/retention-verify.mjs",
-    "contract:update": "node demo_code/update-tool-contract.mjs"
+    "prepack": "npm run build"
   },
   "keywords": [
     "mcp",

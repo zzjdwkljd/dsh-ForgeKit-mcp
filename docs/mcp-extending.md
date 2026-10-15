@@ -79,13 +79,13 @@ export const builtinModules: readonly ToolModule[] = Object.freeze([
 
 ### 3. 补测试并更新版本
 
-1. 为新增工具补正常输入、非法输入和异常路径测试（`demo_code/*.test.mjs`，随仓库版本控制）。
-2. 运行 `npm run typecheck` 与 `npm test`。
+1. 为新增工具补正常输入、非法输入和异常路径测试（`demo_code/*.test.mjs`，本地脚本，不随仓库发布）。
+2. 运行 `npm run typecheck`；本地如有 `demo_code/`，再运行其中的测试。
 3. 工具清单变化会使契约对比测试失败，这是有意的保护，而不是应当删除的断言。
-4. 用 `npm run contract:update` 重新生成 `test/contracts/tools.v1.json`（派生产物，禁止手工编辑），并审查差异，避免意外接受旧工具参数变更。
+4. 用契约生成脚本重新生成 `test/contracts/tools.v1.json`（派生产物，禁止手工编辑），并审查差异，避免意外接受旧工具参数变更。
 5. 按 SemVer 更新版本与 `CHANGELOG.md`。增加兼容的新工具通常使用 `npm version minor --no-git-tag-version`。
 
-`tools.v1.json` 中的 `v1` 表示第一代基线文件；在 1.x 兼容扩展时更新同一文件，不为每个 PATCH/MINOR 复制一份快照。该文件由 `npm run contract:update` 从真实注册结果生成，请勿手工编辑。
+`tools.v1.json` 中的 `v1` 表示第一代基线文件；在 1.x 兼容扩展时更新同一文件，不为每个 PATCH/MINOR 复制一份快照。该文件由契约生成脚本从真实注册结果生成，请勿手工编辑。
 
 ## 生命周期与资源
 
@@ -123,7 +123,7 @@ try {
 ## 测试与发布边界
 
 - `npm run typecheck`：类型检查，不产出文件。`npm run build` 编译到 `dist/`。
-- 测试与验证脚本位于 `demo_code/`，随仓库版本控制但不进入 npm 发布包（由 `package.json.files` 控制）。`src/`、正式启动、构建和发布产物不依赖它们；删除后正式服务仍可构建、启动并调用工具。
+- 测试与验证脚本位于 `demo_code/`，**不随仓库版本控制**（`.gitignore` 已排除）：它们只 import `dist/`，与 `src/` 单向解耦，因此仓库不含它们也不影响构建、启动或发布；本地需要跑测试或重新生成契约时须自行提供该目录。`src/`、正式启动、构建和发布产物不依赖它们；删除后正式服务仍可构建、启动并调用工具。
 - 契约数据放在 `test/contracts/`；不要把日志或基线 JSON 放进 `docs/`。
 - npm 发布文件通过 `package.json.files` 白名单控制。发布前运行 `npm pack --dry-run --ignore-scripts`，确认未包含 `test/login-state/`、截图、环境文件或日志。
 - 新增依赖按实际使用引入。

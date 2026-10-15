@@ -2,6 +2,12 @@
 
 遵循语义化版本：兼容修复升 PATCH，兼容功能扩展升 MINOR，不兼容工具契约变化升 MAJOR。
 
+## [Unreleased]
+
+### Changed
+
+- `demo_code/` 退出仓库版本控制（`.gitignore` 重新排除，`package.json` 删除 `test` / `test:retention` / `contract:update` 三个指向它的 script）。这些脚本只 import `dist/`，与 `src/` 单向解耦，删除后构建、启动和发布均不受影响（已实测：移走该目录后 `npm run build` 通过，服务器经 MCP 协议往返仍注册全部 29 个工具）。这是对 1.1.0 把 `demo_code/` 纳入版本控制之决定的回退——那会让干净克隆依赖一份与发布服务无关的本地脚本。`test/contracts/tools.v1.json` 仍在仓库中，作为 29 工具的声明基线；重新生成它需本地自备该目录。
+
 ## [1.2.0] - 2026-10-15
 
 ### Added

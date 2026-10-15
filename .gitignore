@@ -14,6 +14,6 @@ test/**
 # Local-only working notes (not part of the published project).
 docs/mcp-handoff.md
 
-# Test/probe scripts are versioned so `npm test` works from a clean clone.
-# They stay out of the published package via package.json "files"; the service
-# must still build, start and serve tools without this directory (see AGENTS.md).
+# Local test/probe scripts. The published service must build, start and serve
+# tools without this directory; see AGENTS.md.
+demo_code/

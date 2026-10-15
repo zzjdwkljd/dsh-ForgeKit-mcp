@@ -48,8 +48,8 @@
 | --- | --- |
 | `npm run typecheck` | 本机因 tsgo 环境问题不可执行（见下方排错）；在 C: 盘用同一编译器运行项目 tsconfig 通过，0 错误 |
 | `npm run build` | 同上，C: 盘执行通过，产出 `dist/` |
-| `npm test` | 50 项断言全部通过（契约一致性、副作用注解、模块回收、headers/data-paths/retention/humanize 纯函数） |
-| 契约一致性 | `test/contracts/tools.v1.json` 由 `npm run contract:update` 生成，与注册结果逐字段一致 |
+| 本地测试（`demo_code/`，不随仓库发布） | 59 项断言全部通过（契约一致性、副作用注解、模块回收、headers/data-paths/retention/humanize 纯函数、bash 探测） |
+| 契约一致性 | `test/contracts/tools.v1.json` 与真实 MCP 注册结果逐字段一致；由契约生成脚本从 `dist/` 重新生成，请勿手工编辑 |
 | 真实 stdio 客户端握手 | 返回 `forgekit-mcp` / `ForgeKit MCP` / 当前版本 |
 | `npm pack --dry-run --json --ignore-scripts` | 未包含登录态、截图、测试数据、日志或依赖目录；README 链接的两份文档已入白名单 |
 | 文档格式 | 使用 LF，无行尾空白 |

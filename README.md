@@ -25,7 +25,6 @@ npm install
 npm run build      # tsc 编译到 dist/
 npm start          # 启动 MCP 服务器 (stdio)
 npm run typecheck  # 仅类型检查，不产出文件
-npm test           # 契约护栏 + 纯函数回归（pretest 会先自动 build）
 ```
 
 构建后按下方「在 MCP 客户端中注册」配置客户端即可。
