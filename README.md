@@ -1,10 +1,10 @@
 # ForgeKit MCP
 
-**可扩展的本地 MCP 工具集 · v1.0.0 · TypeScript · 跨平台**
+**可扩展的本地 MCP 工具集 · v1.2.0 · TypeScript · 跨平台**
 
 Forge（锻造）+ Kit（工具集）：名称不限定某一种能力，截图与浏览器自动化是首批内置模块，后续功能以独立模块接入。
 
-一个基于 [Model Context Protocol](https://modelcontextprotocol.io) 的 MCP 服务器，提供 **25 个工具**：
+一个基于 [Model Context Protocol](https://modelcontextprotocol.io) 的 MCP 服务器，提供 **29 个工具**：
 
 - **截图工具** —— 纯代码实现（[`node-screenshots`](https://www.npmjs.com/package/node-screenshots) Rust/NAPI 原生库），同一套代码支持 **Windows / macOS / Linux**
 - **浏览器自动化工具** —— 基于 `playwright-core` 驱动本机 Chrome/Edge，无需下载浏览器
@@ -25,6 +25,7 @@ npm install
 npm run build      # tsc 编译到 dist/
 npm start          # 启动 MCP 服务器 (stdio)
 npm run typecheck  # 仅类型检查，不产出文件
+npm test           # 契约护栏 + 纯函数回归（pretest 会先自动 build）
 ```
 
 构建后按下方「在 MCP 客户端中注册」配置客户端即可。
@@ -89,12 +90,14 @@ DSH 通过 profile 的 patch 层注册外部 MCP 服务器，配置写入 `~/.ds
 |---|---|
 | `browser_launch` | 启动浏览器（可选）；`headless:false` 显示窗口、`persistent` 登录态持久化(默认开)、`stealth` 反检测(默认开)、`humanize` 拟人化(默认开)、`userAgent`/`headers` 自定义请求头、`userDataDir` 配置目录 |
 | `browser_close` | 关闭浏览器（登录态自动备份） |
-| `browser_humanize` 🆕 | 查看/修改拟人化设置（打字间隔、操作停顿、开关），运行时生效 |
-| `browser_save_state` 🆕 | 导出登录态（cookies + localStorage）为 JSON 文件 |
-| `browser_load_state` 🆕 | 导入登录态并刷新页面 |
-| `browser_headers` 🆕 | 请求头管理（get/set/clear）：三层策略，自定义 UA 自动派生 sec-ch-ua 并同步 navigator 指纹 |
-| `browser_navigate` | 导航到 URL（省略协议自动补 `https://`）；`waitUntil`: load / domcontentloaded / networkidle / commit |
+| `browser_humanize` | 查看/修改拟人化设置（打字间隔、操作停顿、开关），运行时生效 |
+| `browser_save_state` | 导出登录态（cookies + localStorage）为 JSON 文件 |
+| `browser_load_state` | 导入登录态并刷新页面 |
+| `browser_headers` | 请求头管理（get/set/clear）：三层策略，自定义 UA 自动派生 sec-ch-ua 并同步 navigator 指纹 |
+| `browser_navigate` | 导航到 URL（省略协议自动补 `https://`；支持 `file:` 打开本地页面）；`waitUntil`: load / domcontentloaded / networkidle / commit |
 | `browser_info` | 当前状态：URL、标题、视口、无头模式、可执行文件路径 |
+| `browser_console` 🆕 | 读取缓冲的页面 console 输出与未捕获异常（pageerror），支持级别/子串/增量过滤（环形缓冲，默认 200 条） |
+| `browser_network` 🆕 | 读取缓冲的网络请求（方法/URL/状态/类型/耗时；失败请求带响应体预览），支持只看失败 |
 | `browser_screenshot` | 网页截图（`fullPage: true` 截整页），返回 PNG |
 | `browser_click` | 点击元素；左/右/中键、双击/三击 |
 | `browser_type` | 输入文本；`clear` 清空填写，否则逐字输入；`submit` 后按 Enter |
@@ -102,12 +105,19 @@ DSH 通过 profile 的 patch 层注册外部 MCP 服务器，配置写入 `~/.ds
 | `browser_select` | `<select>` 选择（`value`/`label`/`index` 三选一） |
 | `browser_scroll` | 滚动窗口或指定元素 |
 | `browser_scroll_all` | 分步滚动到底以触发懒加载，带最大次数保护 |
-| `browser_wait` | 等待选择器状态（attached/detached/visible/hidden）或定时等待 |
+| `browser_wait` | 等待选择器状态、定时等待，或轮询 JS 表达式直到为真（`script` 条件等待，返回 satisfied/elapsedMs） |
+| `browser_clock` 🆕 | 页面时间控制：mock Date/定时器/performance.now，手动快进假时间触发到期定时器（install/advance/status/uninstall） |
 | `browser_evaluate` | 页面内执行 JS 表达式，返回 JSON |
 | `browser_get_text` | 提取元素可见文本（默认 body，上限 50k 字符） |
 | `browser_get_html` | 提取元素 outerHTML（留空返回整个文档，上限 50k） |
 | `browser_history` | 后退 / 前进 / 刷新 |
 | `browser_tabs` | 标签页：list / new（可带 url）/ close |
+
+### Git Bash 工具
+
+| 工具 | 说明 |
+|---|---|
+| `shell` 🆕 | 持久 Git Bash 会话（默认会话 `main`）：变量/工作目录/函数跨调用保留；bash 自动探测（git on PATH + 标准布局，`MCP_SHELL_BASH` 可覆盖）；MSYS2 UTF-8 原生，中文输出干净；输出截尾 200k 字符；超时不杀会话 |
 
 ### 选择器语法（Playwright）
 
@@ -140,7 +150,7 @@ src/
 scripts/capture.ps1        # Windows 截图降级脚本
 
 test/                      # 只存放数据，不放测试代码
-  contracts/tools.v1.json  # 25 个工具的完整声明基线
+  contracts/tools.v1.json  # 29 个工具的完整声明基线
   login-state/             # 私有浏览器配置与登录态；不进入发布包
   screenshot/              # 截图输出；不进入发布包
 
@@ -259,7 +269,7 @@ browser_launch  { headers: {...}, userAgent: "..." }                // 启动时
 - 校验失败**整体拒绝**，绝不半应用（宁可报错也不留不一致状态）
 - 拒绝覆盖：`Host` / `Content-Length` / `Connection` 等 HTTP 框架头，`:proxy-`、`sec-websocket-` 前缀——覆盖它们会破坏请求或暴露自动化
 - 拒绝控制字符（`CRLF` 请求头注入）
-- `Cookie` 可设但会提示改用 `browser_load_state`（避免与 Cookie 罐叠加）
+- `Cookie` 被拒绝（由浏览器 Cookie 罐管理；`setExtraHTTPHeaders` 作用于所有域，手工设置会把同一凭据发给每个站点），导入请用 `browser_load_state`
 - `Accept-Language` 走 CDP `acceptLanguage` 通道（优先级高于 extraHTTPHeaders），自动剥掉 q 权重传裸列表，由 Chrome 生成规范 q 值——与真实浏览器逐字节一致
 
 **验证**：自定义头真实上线、sec-ch-ua 派生与 UA 一致、`navigator.userAgentData` 与请求头不劈叉、clear 后回到原生、注入与框架头被拒绝。
@@ -310,7 +320,7 @@ browser_humanize { actionDelayMinMs: 0, actionDelayMaxMs: 0 }    → 取消操�
 ## 版本与发布约定
 
 - 项目名称：**ForgeKit MCP**；npm 包名与 MCP `serverInfo.name`：`forgekit-mcp`。
-- 当前版本：**1.0.0**。原 `2.0.0` 未发布，经确认重新定为首个模块化基线，不表示本次已发布到 npm。
+- 当前版本：**1.2.0**。`1.0.0` 是首个模块化基线；`1.1.0` 补齐测试护栏、修正工具注解、并加固导航协议与可执行文件边界；`1.2.0` 新增页面诊断（console/网络）、确定性时间控制与持久 Git Bash 会话。
 - 遵循 SemVer：兼容修复升 PATCH（`1.0.1`），兼容的新模块/工具升 MINOR（`1.1.0`），破坏工具参数、返回语义或移除工具升 MAJOR（`2.0.0`）。
 - `package.json` 是版本来源，MCP 握手和启动日志自动读取它；用 `npm version patch --no-git-tag-version` 等命令同步更新锁文件。
 - 发布白名单仅包含编译产物、必要脚本和文档，不包含浏览器配置、登录态、截图或测试日志。发布前仍应执行 `npm pack --dry-run --ignore-scripts` 审查文件清单。

@@ -14,6 +14,20 @@ export function ok(content: Array<TextContent | ImageContent>): CallToolResult {
   return { content };
 }
 
+/**
+ * Flatten nested AggregateErrors so every sub-cause stays visible: an
+ * AggregateError's own `message` hides the real reasons (e.g. which of the two
+ * browser launch modes failed, and why).
+ */
+export function describeError(error: unknown): string {
+  if (error instanceof AggregateError) {
+    const parts = error.errors.map((inner) => describeError(inner));
+    return `${error.message} [${parts.join(' | ')}]`;
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 /** Keep exceptions inside the MCP tool-result contract, including sync handlers. */
 export function tool<A>(
   handler: (args: A) => CallToolResult | Promise<CallToolResult>,
@@ -22,8 +36,7 @@ export function tool<A>(
     try {
       return await handler(args);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { content: [text(`Error: ${message}`)], isError: true };
+      return { content: [text(`Error: ${describeError(error)}`)], isError: true };
     }
   };
 }

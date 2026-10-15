@@ -2,7 +2,7 @@
 
 ## 设计目标
 
-新增一种能力时，增加一个功能模块并接入模块清单；不向启动入口继续堆叠工具定义。当前内置 `screenshot` 和 `browser`，现有 25 个工具的名称、参数、描述与注解保持兼容。
+新增一种能力时，增加一个功能模块并接入模块清单；不向启动入口继续堆叠工具定义。当前内置 `screenshot`、`browser` 和 `shell`，现有 29 个工具的名称、参数、描述与注解保持兼容。
 
 这是一套编译期显式注册的模块架构，不是动态加载任意第三方代码的插件市场。暂不增加依赖注入框架、自动扫描目录或插件安装器。
 
@@ -79,13 +79,13 @@ export const builtinModules: readonly ToolModule[] = Object.freeze([
 
 ### 3. 补测试并更新版本
 
-1. 为新增工具补正常输入、非法输入和异常路径测试。测试脚本是本地文件，不随仓库发布，见下方「测试与发布边界」。
-2. 运行 `npm run typecheck`。
+1. 为新增工具补正常输入、非法输入和异常路径测试（`demo_code/*.test.mjs`，随仓库版本控制）。
+2. 运行 `npm run typecheck` 与 `npm test`。
 3. 工具清单变化会使契约对比测试失败，这是有意的保护，而不是应当删除的断言。
-4. 确认变更符合预期后更新 `test/contracts/tools.v1.json`，并审查差异，避免意外接受旧工具参数变更。
+4. 用 `npm run contract:update` 重新生成 `test/contracts/tools.v1.json`（派生产物，禁止手工编辑），并审查差异，避免意外接受旧工具参数变更。
 5. 按 SemVer 更新版本与 `CHANGELOG.md`。增加兼容的新工具通常使用 `npm version minor --no-git-tag-version`。
 
-`tools.v1.json` 中的 `v1` 表示第一代基线文件；在 1.x 兼容扩展时更新同一文件，不为每个 PATCH/MINOR 复制一份快照。
+`tools.v1.json` 中的 `v1` 表示第一代基线文件；在 1.x 兼容扩展时更新同一文件，不为每个 PATCH/MINOR 复制一份快照。该文件由 `npm run contract:update` 从真实注册结果生成，请勿手工编辑。
 
 ## 生命周期与资源
 
@@ -123,7 +123,7 @@ try {
 ## 测试与发布边界
 
 - `npm run typecheck`：类型检查，不产出文件。`npm run build` 编译到 `dist/`。
-- 测试与验证脚本是本地文件，不随仓库发布。`src/`、正式启动、构建和发布产物不依赖它们；删除后正式服务仍可构建、启动并调用工具。
+- 测试与验证脚本位于 `demo_code/`，随仓库版本控制但不进入 npm 发布包（由 `package.json.files` 控制）。`src/`、正式启动、构建和发布产物不依赖它们；删除后正式服务仍可构建、启动并调用工具。
 - 契约数据放在 `test/contracts/`；不要把日志或基线 JSON 放进 `docs/`。
 - npm 发布文件通过 `package.json.files` 白名单控制。发布前运行 `npm pack --dry-run --ignore-scripts`，确认未包含 `test/login-state/`、截图、环境文件或日志。
 - 新增依赖按实际使用引入。

@@ -1,21 +1,28 @@
 // browser.ts - typed browser automation on playwright-core driving a locally
 // installed Chrome/Edge (works on Windows, macOS and Linux; no browser download).
+import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
 import type { Browser, BrowserContext, CDPSession, Page } from 'playwright-core';
-import { PROJECT_ROOT, dataPath, resolveDataPath, checkedDataPath, ensureDataDir, createDataRun, readDataFile, writeDataFile } from './core/data-paths.js';
+import { PROJECT_ROOT, dataPath, checkedDataPath, ensureDataDir, createDataRun, readDataFile, writeDataFile } from './core/data-paths.js';
 import { defaultHumanize, mergeHumanize, randInt, scrollSteps } from './browser/humanize.js';
 import type { HumanizeOptions, HumanizeUpdate } from './browser/humanize.js';
 import { launchOwnedBrowser } from './browser/owned-process.js';
 import { parseStorageState, restoreLocalStorage } from './browser/storage-state.js';
+import { attachDiagnostics, resetDiagnostics, consoleEntries, networkEntries, diagnosticsInfo } from './browser/diagnostics.js';
+import type { ConsoleEntry, ConsoleQuery, ConsoleResult, NetworkEntry, NetworkQuery, NetworkResult } from './browser/diagnostics.js';
+import { createClockController } from './browser/clock.js';
+import type { ClockAdvanceResult, ClockInstallResult, ClockStatus } from './browser/clock.js';
 import { screenshotDirectory, persistScreenshot } from './screenshot/index.js';
 import { requestRetentionSweep } from './screenshot/retention.js';
 import { pngSize } from './screenshot/png.js';
 import type { ShotResult } from './types.js';
 export type { HumanizeOptions, HumanizeUpdate } from './browser/humanize.js';
+export type { ConsoleEntry, ConsoleQuery, ConsoleResult, NetworkEntry, NetworkQuery, NetworkResult } from './browser/diagnostics.js';
+export type { ClockAdvanceResult, ClockInstallResult, ClockStatus } from './browser/clock.js';
 import {
   buildEffective,
   deriveConsistency,
@@ -264,10 +271,27 @@ function clampInt(raw: string | undefined, fallback: number, min: number, max: n
   return Math.min(max, Math.max(min, n));
 }
 
-function resolveExecutable(custom: string | undefined): string {
+/**
+ * Executable basenames we are willing to launch. `executablePath` is a tool
+ * argument, so without this list a model could start any local program. The
+ * MCP_BROWSER_EXECUTABLE env var is operator-controlled and stays unrestricted.
+ */
+const ALLOWED_BROWSER_BASENAMES: ReadonlySet<string> = new Set([
+  'chrome.exe', 'msedge.exe', 'chromium.exe',
+  'chrome', 'msedge', 'chromium',
+  'google-chrome', 'google-chrome-stable', 'chromium-browser',
+  'google chrome', 'microsoft edge',
+]);
+
+/** Exported for the executable-allowlist guard test. */
+export function resolveExecutable(custom: string | undefined): string {
   if (custom !== undefined) {
     const candidate = path.resolve(PROJECT_ROOT, custom);
     if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) throw new Error('The requested browser executable does not exist');
+    const basename = path.basename(candidate).toLowerCase();
+    if (!ALLOWED_BROWSER_BASENAMES.has(basename)) {
+      throw new Error(`Refusing to launch "${path.basename(candidate)}": executablePath must point at a Chromium-based browser (Chrome, Edge or Chromium).`);
+    }
     return candidate;
   }
   for (const candidate of EXECUTABLE_CANDIDATES) {
@@ -313,11 +337,19 @@ export function updateHumanize(update: HumanizeUpdate): HumanizeOptions {
   return { ...candidate };
 }
 
-// Serialize lifecycle/configuration mutations without holding a lock around page actions.
-let lifecycleTail: Promise<void> = Promise.resolve();
+// Serialize every lifecycle, configuration and page operation: the browser
+// backend is a process-level singleton (docs/mcp-project-foundation.md), so two
+// concurrent MCP tool calls must never interleave on the shared state.page.
+//
+// The lock is re-entrant (AsyncLocalStorage), so a serialized operation may call
+// another serialized helper -- navigate() -> ensurePage() -> launchBrowser() --
+// without deadlocking against itself.
+const operationContext = new AsyncLocalStorage<true>();
+let operationTail: Promise<void> = Promise.resolve();
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
-  const result = lifecycleTail.then(operation);
-  lifecycleTail = result.then(() => undefined, () => undefined);
+  if (operationContext.getStore()) return operation();
+  const result = operationTail.then(() => operationContext.run(true, operation));
+  operationTail = result.then(() => undefined, () => undefined);
   return result;
 }
 
@@ -548,10 +580,31 @@ function applyTimeouts(page: Page): void {
   page.setDefaultNavigationTimeout(DEFAULT_TIMEOUT_MS);
 }
 
-function normalizeUrl(url: string): string {
+/**
+ * Schemes a navigation may use. `file:` is an explicit capability (local test
+ * pages, saved snapshots) — 2026-10-15 user decision. `data:`/`blob:` smuggle
+ * content and `chrome:` reaches browser internals; those stay rejected because
+ * a page can talk the model into navigating to them.
+ */
+const ALLOWED_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:', 'about:', 'file:']);
+const REFUSED_SCHEME_HINTS: ReadonlyMap<string, string> = new Map([
+  ['data:', 'data: URLs can smuggle arbitrary content; use a local file via file: instead'],
+  ['blob:', 'blob: URLs are page-generated content; navigate to a real URL or file: instead'],
+  ['chrome:', 'chrome:// pages are browser internals and cannot be automated reliably'],
+  ['javascript:', 'javascript: URLs execute code in the page; use browser_evaluate instead'],
+]);
+
+/** Exported for the navigation-scheme guard test. */
+export function normalizeUrl(url: string): string {
   const s = String(url).trim();
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return s; // already has a scheme
-  return `https://${s}`;
+  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(s);
+  if (!match?.[1]) return `https://${s}`; // no scheme: assume https
+  const scheme = `${match[1].toLowerCase()}:`;
+  if (!ALLOWED_SCHEMES.has(scheme)) {
+    const hint = REFUSED_SCHEME_HINTS.get(scheme);
+    throw new Error(`Refusing to navigate to a "${scheme}" URL${hint ? `; ${hint}` : '; only http, https, file and about are allowed.'}`);
+  }
+  return s;
 }
 
 function truncate(text: string, label: string): TextOutput {
@@ -559,6 +612,18 @@ function truncate(text: string, label: string): TextOutput {
     return { text: text.slice(0, MAX_TEXT_CHARS), truncated: true, totalLength: text.length, source: label };
   }
   return { text, truncated: false, totalLength: text.length, source: label };
+}
+
+/** Reject a promise that does not settle within `ms`, so a hostile page cannot
+ *  hang a tool call forever. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error: unknown) => { clearTimeout(timer); reject(error); },
+    );
+  });
 }
 
 // stealth retains the existing launch-level compatibility flags only.
@@ -577,6 +642,8 @@ function resetState(): void {
   state.stealth = null;
   state.nativeUserAgent = null;
   // customHeaders / userAgent / humanize survive restarts like session config.
+  // Diagnostics are per-context buffers; the old context is gone, so drop them.
+  resetDiagnostics();
 }
 
 export function isRunning(): boolean {
@@ -671,6 +738,8 @@ async function launchBrowserUnlocked(opts: LaunchOptions): Promise<BrowserInfo> 
     const activeContext = context;
     browser?.on('disconnected', () => { if (state.browser === browser) resetState(); });
     context.on('close', () => { if (state.context === activeContext) resetState(); });
+    // Page observability (console / pageerror / network) for browser_console & browser_network.
+    attachDiagnostics(context);
     context.on('page', (page) => {
       if (state.context !== activeContext) return;
       void preparePage(page).catch((error: unknown) => { lastUaSyncErrors.push(error instanceof Error ? error.message : String(error)); });
@@ -760,7 +829,11 @@ export async function browserInfo(): Promise<BrowserInfo> {
 
 // ---------- page actions ----------
 
-export async function navigate(url: string, waitUntil: WaitUntil = 'load'): Promise<NavigateResult> {
+export function navigate(url: string, waitUntil: WaitUntil = 'load'): Promise<NavigateResult> {
+  return serialized(() => navigateUnlocked(url, waitUntil));
+}
+
+async function navigateUnlocked(url: string, waitUntil: WaitUntil): Promise<NavigateResult> {
   const page = await ensurePage();
   const response = await page.goto(normalizeUrl(url), { waitUntil });
   return {
@@ -771,7 +844,11 @@ export async function navigate(url: string, waitUntil: WaitUntil = 'load'): Prom
   };
 }
 
-export async function goHistory(action: HistoryAction): Promise<HistoryResult> {
+export function goHistory(action: HistoryAction): Promise<HistoryResult> {
+  return serialized(() => goHistoryUnlocked(action));
+}
+
+async function goHistoryUnlocked(action: HistoryAction): Promise<HistoryResult> {
   const page = await ensurePage();
   if (action === 'back') {
     await page.goBack({ waitUntil: 'load' }).catch((e: Error) => {
@@ -787,7 +864,11 @@ export async function goHistory(action: HistoryAction): Promise<HistoryResult> {
   return { url: page.url(), title: await page.title().catch(() => '') };
 }
 
-export async function screenshotPageWithPath(opts: { fullPage?: boolean | undefined } = {}): Promise<ShotResult> {
+export function screenshotPageWithPath(opts: { fullPage?: boolean | undefined } = {}): Promise<ShotResult> {
+  return serialized(() => screenshotPageWithPathUnlocked(opts));
+}
+
+async function screenshotPageWithPathUnlocked(opts: { fullPage?: boolean | undefined }): Promise<ShotResult> {
   const directory = await screenshotDirectory('browser_screenshot');
   const page = await ensurePage();
   const png = await page.screenshot({ type: 'png', fullPage: opts.fullPage ?? false });
@@ -801,7 +882,11 @@ export async function screenshotPage(opts: { fullPage?: boolean | undefined } = 
   return (await screenshotPageWithPath(opts)).base64;
 }
 
-export async function click(selector: string, opts: ClickOptions = {}): Promise<ClickResult> {
+export function click(selector: string, opts: ClickOptions = {}): Promise<ClickResult> {
+  return serialized(() => clickUnlocked(selector, opts));
+}
+
+async function clickUnlocked(selector: string, opts: ClickOptions): Promise<ClickResult> {
   const page = await ensurePage();
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const loc = page.locator(selector).first();
@@ -810,7 +895,11 @@ export async function click(selector: string, opts: ClickOptions = {}): Promise<
   return { clicked: selector, url: page.url() };
 }
 
-export async function typeText(selector: string, value: string, opts: TypeOptions = {}): Promise<TypeResult> {
+export function typeText(selector: string, value: string, opts: TypeOptions = {}): Promise<TypeResult> {
+  return serialized(() => typeTextUnlocked(selector, value, opts));
+}
+
+async function typeTextUnlocked(selector: string, value: string, opts: TypeOptions): Promise<TypeResult> {
   const page = await ensurePage();
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const loc = page.locator(selector).first();
@@ -835,7 +924,11 @@ export async function typeText(selector: string, value: string, opts: TypeOption
   return { typed: value.length, submitted: opts.submit ?? false, url: page.url() };
 }
 
-export async function pressKey(key: string, selector?: string | undefined): Promise<PressResult> {
+export function pressKey(key: string, selector?: string | undefined): Promise<PressResult> {
+  return serialized(() => pressKeyUnlocked(key, selector));
+}
+
+async function pressKeyUnlocked(key: string, selector?: string | undefined): Promise<PressResult> {
   const page = await ensurePage();
   if (selector) {
     const loc = page.locator(selector).first();
@@ -847,7 +940,11 @@ export async function pressKey(key: string, selector?: string | undefined): Prom
   return { pressed: key, url: page.url() };
 }
 
-export async function selectOption(selector: string, opts: SelectOptions = {}): Promise<SelectResult> {
+export function selectOption(selector: string, opts: SelectOptions = {}): Promise<SelectResult> {
+  return serialized(() => selectOptionUnlocked(selector, opts));
+}
+
+async function selectOptionUnlocked(selector: string, opts: SelectOptions): Promise<SelectResult> {
   const page = await ensurePage();
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const loc = page.locator(selector).first();
@@ -869,7 +966,11 @@ export async function selectOption(selector: string, opts: SelectOptions = {}): 
   return { selected };
 }
 
-export async function scroll(opts: ScrollOptions = {}): Promise<ScrollResult> {
+export function scroll(opts: ScrollOptions = {}): Promise<ScrollResult> {
+  return serialized(() => scrollUnlocked(opts));
+}
+
+async function scrollUnlocked(opts: ScrollOptions): Promise<ScrollResult> {
   const page = await ensurePage();
   const deltaX = opts.deltaX ?? 0;
   const deltaY = opts.deltaY ?? 600;
@@ -908,7 +1009,11 @@ export async function scroll(opts: ScrollOptions = {}): Promise<ScrollResult> {
   };
 }
 
-export async function wait(opts: WaitOptions = {}): Promise<WaitResult> {
+export function wait(opts: WaitOptions = {}): Promise<WaitResult> {
+  return serialized(() => waitUnlocked(opts));
+}
+
+async function waitUnlocked(opts: WaitOptions): Promise<WaitResult> {
   const page = await ensurePage();
   if (opts.selector) {
     await page.waitForSelector(opts.selector, {
@@ -922,15 +1027,24 @@ export async function wait(opts: WaitOptions = {}): Promise<WaitResult> {
   return { waited: 'time', ms };
 }
 
-export async function evaluate(script: string): Promise<EvaluateResult> {
+export function evaluate(script: string): Promise<EvaluateResult> {
+  return serialized(() => evaluateUnlocked(script));
+}
+
+async function evaluateUnlocked(script: string): Promise<EvaluateResult> {
   const page = await ensurePage();
-  const result: unknown = await page.evaluate(script);
+  // A hostile page can return a never-settling Promise; bound the wait so a tool
+  // call cannot hang forever, and cap the output so the response cannot balloon.
+  const result: unknown = await withTimeout(page.evaluate(script), DEFAULT_TIMEOUT_MS, 'browser_evaluate');
   if (result === undefined) return { result: 'undefined' };
+  let rendered: string;
   try {
-    return { result: JSON.stringify(result, null, 2) ?? String(result) };
+    rendered = JSON.stringify(result, null, 2) ?? String(result);
   } catch {
-    return { result: String(result) };
+    rendered = String(result);
   }
+  const output = truncate(rendered, 'browser_evaluate');
+  return { result: output.truncated ? `${output.text}\n...[truncated, ${output.totalLength} chars total]` : output.text };
 }
 
 export interface ScrollAllOptions {
@@ -956,7 +1070,11 @@ export interface ExtractOptions {
  * This triggers lazy-loading (infinite scroll, loading="lazy" images) so the
  * content can be extracted afterwards.
  */
-export async function scrollAll(opts: ScrollAllOptions = {}): Promise<ScrollAllResult> {
+export function scrollAll(opts: ScrollAllOptions = {}): Promise<ScrollAllResult> {
+  return serialized(() => scrollAllUnlocked(opts));
+}
+
+async function scrollAllUnlocked(opts: ScrollAllOptions): Promise<ScrollAllResult> {
   const page = await ensurePage();
   const maxScrolls = Math.min(Math.max(opts.maxScrolls ?? 30, 1), 200);
   const step = Math.min(Math.max(opts.stepPx ?? 600, 50), 2000);
@@ -991,7 +1109,11 @@ export async function scrollAll(opts: ScrollAllOptions = {}): Promise<ScrollAllR
   return { scrolls, finalHeight: lastHeight, reachedBottom, url: page.url() };
 }
 
-export async function getText(selector = 'body', opts: ExtractOptions = {}): Promise<TextOutput> {
+export function getText(selector = 'body', opts: ExtractOptions = {}): Promise<TextOutput> {
+  return serialized(() => getTextUnlocked(selector, opts));
+}
+
+async function getTextUnlocked(selector: string, opts: ExtractOptions): Promise<TextOutput> {
   const page = await ensurePage();
   if (opts.autoScroll ?? false) await scrollAll(opts.scrollAll);
   const loc = page.locator(selector).first();
@@ -999,7 +1121,11 @@ export async function getText(selector = 'body', opts: ExtractOptions = {}): Pro
   return truncate(value ?? '', selector);
 }
 
-export async function getHtml(selector?: string | undefined, opts: ExtractOptions = {}): Promise<TextOutput> {
+export function getHtml(selector?: string | undefined, opts: ExtractOptions = {}): Promise<TextOutput> {
+  return serialized(() => getHtmlUnlocked(selector, opts));
+}
+
+async function getHtmlUnlocked(selector: string | undefined, opts: ExtractOptions): Promise<TextOutput> {
   const page = await ensurePage();
   if (opts.autoScroll ?? false) await scrollAll(opts.scrollAll);
   if (!selector) return truncate(await page.content(), '(document)');
@@ -1008,7 +1134,11 @@ export async function getHtml(selector?: string | undefined, opts: ExtractOption
   return truncate(html ?? '', selector);
 }
 
-export async function tabs(action: TabAction, url?: string | undefined): Promise<TabsResult> {
+export function tabs(action: TabAction, url?: string | undefined): Promise<TabsResult> {
+  return serialized(() => tabsUnlocked(action, url));
+}
+
+async function tabsUnlocked(action: TabAction, url?: string | undefined): Promise<TabsResult> {
   const page = await ensurePage();
   const context = page.context();
 
@@ -1056,7 +1186,11 @@ async function stateFileTarget(file: string | undefined, reading: boolean): Prom
   return checkedDataPath(DEFAULT_STATE_FILE, LOGIN_ROOT);
 }
 
-export async function saveState(file?: string | undefined): Promise<StateFile> {
+export function saveState(file?: string | undefined): Promise<StateFile> {
+  return serialized(() => saveStateUnlocked(file));
+}
+
+async function saveStateUnlocked(file?: string | undefined): Promise<StateFile> {
   const target = await stateFileTarget(file, false);
   const page = await ensurePage();
   const snapshot = await page.context().storageState();
@@ -1064,7 +1198,11 @@ export async function saveState(file?: string | undefined): Promise<StateFile> {
   return { path: target, cookies: snapshot.cookies.length, origins: snapshot.origins.length };
 }
 
-export async function loadState(file?: string | undefined): Promise<StateLoadResult> {
+export function loadState(file?: string | undefined): Promise<StateLoadResult> {
+  return serialized(() => loadStateUnlocked(file));
+}
+
+async function loadStateUnlocked(file?: string | undefined): Promise<StateLoadResult> {
   const target = await stateFileTarget(file, true);
   const raw = parseStorageState(await readDataFile(target, LOGIN_ROOT));
   const page = await ensurePage();
@@ -1074,4 +1212,105 @@ export async function loadState(file?: string | undefined): Promise<StateLoadRes
   if (raw.origins.length) { await restoreLocalStorage(context, raw.origins); applied.push('localStorage'); }
   await page.reload({ waitUntil: 'load' });
   return { path: target, cookies: raw.cookies.length, origins: raw.origins.length, applied };
+}
+
+// ---------- page diagnostics (console / network) ----------
+
+export function consoleLogs(query: ConsoleQuery = {}): ConsoleResult {
+  return consoleEntries(query);
+}
+
+export function networkRequests(query: NetworkQuery = {}): NetworkResult {
+  return networkEntries(query);
+}
+
+export function diagnosticsStatus(): { consoleBuffered: number; networkBuffered: number; attached: boolean } {
+  return diagnosticsInfo();
+}
+
+// ---------- conditional wait (browser_wait script mode) ----------
+
+export interface ConditionWaitOptions {
+  script: string;
+  timeoutMs?: number | undefined;
+  pollMs?: number | undefined;
+}
+
+export interface ConditionWaitResult {
+  satisfied: boolean;
+  value: string;
+  elapsedMs: number;
+  polls: number;
+}
+
+/**
+ * Poll a JS expression in the page until it returns a truthy value or the
+ * deadline expires. The expression runs via page.evaluate with the same
+ * timeout cap as browser_evaluate; a throwing expression counts as falsy for
+ * that poll (transient DOM states must not abort the wait).
+ */
+export function waitForCondition(opts: ConditionWaitOptions): Promise<ConditionWaitResult> {
+  return serialized(() => waitForConditionUnlocked(opts));
+}
+
+async function waitForConditionUnlocked(opts: ConditionWaitOptions): Promise<ConditionWaitResult> {
+  const page = await ensurePage();
+  const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, 50), 300000);
+  const pollMs = Math.min(Math.max(opts.pollMs ?? 250, 20), 5000);
+  const deadline = Date.now() + timeoutMs;
+  let polls = 0;
+  let last: unknown = undefined;
+  for (;;) {
+    polls++;
+    last = await withTimeout(
+      page.evaluate(opts.script).catch((error: unknown) => {
+        // A hostile or mid-transition page may throw; treat as falsy but surface the last error.
+        last = `evaluate error: ${error instanceof Error ? error.message : String(error)}`;
+        return undefined;
+      }),
+      DEFAULT_TIMEOUT_MS,
+      'browser_wait condition evaluate',
+    );
+    if (last !== undefined && last !== null && last !== false && last !== '') {
+      return { satisfied: true, value: stringifyConditionValue(last), elapsedMs: timeoutMs - (deadline - Date.now()), polls };
+    }
+    if (Date.now() >= deadline) {
+      return { satisfied: false, value: stringifyConditionValue(last), elapsedMs: timeoutMs, polls };
+    }
+    const sleep = Math.min(pollMs, Math.max(20, deadline - Date.now()));
+    await page.waitForTimeout(sleep);
+  }
+}
+
+function stringifyConditionValue(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+// ---------- deterministic clock ----------
+
+const clock = createClockController(() => ensurePage());
+
+export function clockInstall(epochIso: string): Promise<ClockInstallResult> {
+  return serialized(async () => {
+    const page = await ensurePage();
+    return clock.install(page.context(), epochIso);
+  });
+}
+
+export function clockAdvance(ms: number): Promise<ClockAdvanceResult> {
+  return serialized(() => clock.advance(ms));
+}
+
+export function clockStatus(): Promise<ClockStatus> {
+  return serialized(() => clock.status());
+}
+
+export function clockUninstall(): Promise<{ uninstalled: boolean; realNow: string }> {
+  return serialized(() => clock.uninstall());
 }

@@ -113,9 +113,15 @@ const FRAMING_HEADERS: ReadonlySet<string> = new Set([
 /** Protocol-level pseudo/websocket headers (HTTP/2, WS handshake). */
 const DANGEROUS_PREFIXES: readonly string[] = [':', 'proxy-', 'sec-websocket-'];
 
+/**
+ * Refused outright: the browser owns these end-to-end. `setExtraHTTPHeaders`
+ * applies to every origin, so a hand-set Cookie would leak one credential to
+ * every site the browser visits. Import real cookies with browser_load_state.
+ */
+const BROWSER_OWNED_HEADERS: ReadonlySet<string> = new Set(['cookie']);
+
 /** Allowed but discouraged: the browser manages them better than we can. */
 const DISCOURAGED: ReadonlyMap<string, string> = new Map([
-  ['cookie', 'Cookie 由浏览器 Cookie 罐管理，直接设置会与已存登录态叠加；导入请用 browser_load_state'],
   ['referer', 'Referer 由浏览器按导航自动填写，显式设置可能被忽略或造成不一致'],
   ['origin', 'Origin 由浏览器自动填写，显式设置可能被忽略'],
 ]);
@@ -149,6 +155,10 @@ export function validateHeaders(input: HeaderMap): ValidationResult {
     }
     if (rawValue.length > MAX_VALUE_LENGTH) {
       rejected.push({ name: rawName, value: rawValue, reason: `请求头值超过 ${MAX_VALUE_LENGTH} 字符` });
+      continue;
+    }
+    if (BROWSER_OWNED_HEADERS.has(lower)) {
+      rejected.push({ name: rawName, value: rawValue, reason: 'Cookie 由浏览器 Cookie 罐管理；直接设置会向所有域发送同一值，请改用 browser_load_state' });
       continue;
     }
     if (FRAMING_HEADERS.has(lower) || DANGEROUS_PREFIXES.some((p) => lower.startsWith(p))) {

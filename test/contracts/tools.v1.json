@@ -48,6 +48,46 @@
       }
     },
     {
+      "name": "browser_clock",
+      "title": "页面时间控制",
+      "description": "Deterministic time control for the page: mock Date / setTimeout / setInterval / performance.now, then advance fake time manually to fire due timers (tests timeouts, polling loops, countdowns without real waiting). install persists across navigations via init script; uninstall restores real time on the current document.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "install",
+              "advance",
+              "status",
+              "uninstall"
+            ],
+            "description": "install=开始 mock 时间(必传 epoch); advance=快进假时间并触发到期定时器(必传 ms); status=查看当前假时间与待触发定时器; uninstall=恢复真实时间"
+          },
+          "epoch": {
+            "description": "action=install 必填：假时间起点，ISO 字符串如 '2026-10-15T00:00:00Z'（解析结果按本地时区展示）",
+            "type": "string"
+          },
+          "ms": {
+            "description": "action=advance 必填：快进毫秒数（如 60000 = 1 分钟）",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31540000000
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "openWorldHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
       "name": "browser_close",
       "title": "关闭浏览器",
       "description": "Close the browser instance opened by this server.",
@@ -58,6 +98,51 @@
       },
       "annotations": {
         "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "browser_console",
+      "title": "页面 console / 未捕获异常",
+      "description": "Read buffered console messages and uncaught page errors (pageerror / unhandledrejection) captured since the browser context opened. Ring buffer (default 200 entries) lives in memory only. Use sinceSeq+nextSeq for incremental pulls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sinceSeq": {
+            "description": "只返回序号大于该值的条目（配合返回值里的 nextSeq 做增量拉取）",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "levels": {
+            "description": "只保留这些级别：log/warn/error/info/debug/uncaughterror/unhandledrejection",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "search": {
+            "description": "子串过滤（不区分大小写，匹配文本与 URL）",
+            "type": "string"
+          },
+          "limit": {
+            "description": "最多返回条数，默认 100",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "newestFirst": {
+            "description": "true = 最新在前（默认最新在后）",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
       },
       "execution": {
         "taskSupport": "forbidden"
@@ -411,6 +496,52 @@
       }
     },
     {
+      "name": "browser_network",
+      "title": "页面网络捕获",
+      "description": "Read buffered network exchanges (method/URL/status/type/duration; failed requests include a head-capped response-body preview). Ring buffer (default 200 entries), memory only. failedOnly=true keeps HTTP>=400 and aborted requests.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sinceSeq": {
+            "description": "只返回序号大于该值的条目",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "failedOnly": {
+            "description": "true = 只看失败请求（HTTP>=400 或网络层失败）",
+            "type": "boolean"
+          },
+          "method": {
+            "description": "按 HTTP 方法过滤（如 GET/POST）",
+            "type": "string"
+          },
+          "search": {
+            "description": "URL 子串过滤（不区分大小写）",
+            "type": "string"
+          },
+          "limit": {
+            "description": "最多返回条数，默认 100",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "newestFirst": {
+            "description": "true = 最新在前",
+            "type": "boolean"
+          }
+        },
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
       "name": "browser_press",
       "title": "按键",
       "description": "Press a keyboard key (Enter, Tab, Escape, Control+A...). Optionally focus a selector first.",
@@ -476,7 +607,7 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "openWorldHint": false
       },
       "execution": {
@@ -689,7 +820,7 @@
     {
       "name": "browser_wait",
       "title": "等待",
-      "description": "Wait for a selector to reach a state, or sleep for a number of milliseconds.",
+      "description": "Wait for a selector to reach a state, sleep for milliseconds, or poll a JS expression until it returns a truthy value (script mode: returns {satisfied, value, elapsedMs, polls}; expression errors count as falsy for that poll). Exactly one of selector / script; neither means sleep.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -719,6 +850,16 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 60000
+          },
+          "script": {
+            "description": "JS 表达式条件等待：轮询执行，返回 truthy 即成功（如 document.title 或 location.pathname===\"/x\"）。与 selector 互斥",
+            "type": "string"
+          },
+          "pollMs": {
+            "description": "条件等待轮询间隔(毫秒, 默认 250)",
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 5000
           }
         },
         "$schema": "http://json-schema.org/draft-07/schema#"
@@ -789,7 +930,7 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "openWorldHint": false
       },
       "execution": {
@@ -816,7 +957,7 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "openWorldHint": false
       },
       "execution": {
@@ -848,8 +989,58 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "shell",
+      "title": "Git Bash（持久会话）",
+      "description": "Run bash commands in persistent named sessions (default \"main\"): variables, working directory and functions survive across calls. Uses the locally installed Git Bash (auto-detected via git on PATH and standard layouts; override with MCP_SHELL_BASH). MSYS2 is UTF-8 native, so Chinese output is clean. Output is capped to the last 200k chars; exit codes come from $? after each command; timeouts leave the session alive for follow-ups.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "run",
+              "list",
+              "close",
+              "close_all"
+            ],
+            "description": "run=在会话中执行命令; list=列出会话; close=关闭指定会话; close_all=关闭全部"
+          },
+          "sessionId": {
+            "description": "目标会话 ID；action=run 未传时用默认会话 \"main\"",
+            "type": "string",
+            "maxLength": 40
+          },
+          "command": {
+            "description": "action=run 必填：bash 命令（变量/工作目录/函数跨调用保留）",
+            "type": "string",
+            "maxLength": 200000
+          },
+          "cwd": {
+            "description": "新建会话的工作目录（默认用户主目录；仅在创建时生效）",
+            "type": "string"
+          },
+          "timeoutMs": {
+            "description": "run 超时(毫秒, 默认 120000)；超时不会杀死会话",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 600000
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "openWorldHint": false
       },
       "execution": {
         "taskSupport": "forbidden"

@@ -13,7 +13,8 @@ export function registerContentTools(server: ToolRegistrar): void {
       inputSchema: z.object({
         fullPage: z.boolean().default(false).describe('true = 整页; false = 仅当前视口'),
       }),
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      // Writes a PNG into test/screenshot/browser_screenshot, so it is not read-only.
+      annotations: { readOnlyHint: false, openWorldHint: false },
     },
     tool(async (args: { fullPage: boolean }) => {
       const shot = await browser.screenshotPageWithPath({ fullPage: args.fullPage });

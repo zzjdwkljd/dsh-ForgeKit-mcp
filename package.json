@@ -1,13 +1,18 @@
 {
   "name": "forgekit-mcp",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "An extensible MCP toolkit with modular screenshot and browser automation capabilities.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build",
+    "pretest": "npm run build",
+    "test": "node --test demo_code/*.test.mjs",
+    "test:retention": "node demo_code/retention-verify.mjs",
+    "contract:update": "node demo_code/update-tool-contract.mjs"
   },
   "keywords": [
     "mcp",
@@ -43,6 +48,8 @@
     "README.md",
     "CHANGELOG.md",
     "docs/mcp-extending.md",
-    "docs/mcp-project-foundation.md"
+    "docs/mcp-project-foundation.md",
+    "docs/dsh-install.md",
+    "docs/screenshot-retention-faq.md"
   ]
 }

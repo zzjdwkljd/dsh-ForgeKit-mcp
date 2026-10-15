@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ToolRegistrar } from '../../core/module.js';
 import { ok, text, tool } from '../../core/results.js';
 import * as browser from '../../browser.js';
-import type { HistoryAction, TabAction, WaitUntil } from '../../browser.js';
+import type { HistoryAction } from '../../browser.js';
 
 const NavigateSchema = z.object({
   url: z.string().describe('目标 URL，例如 https://example.com 或 example.com'),
@@ -28,9 +28,7 @@ export function registerNavigationTools(server: ToolRegistrar): void {
       inputSchema: NavigateSchema,
       annotations: { openWorldHint: true },
     },
-    tool(async (args: NavigateArgs) =>
-      ok([text(await browser.navigate(args.url, args.waitUntil as WaitUntil))]),
-    ),
+    tool(async (args: NavigateArgs) => ok([text(await browser.navigate(args.url, args.waitUntil))])),
   );
 
   server.registerTool(
@@ -54,8 +52,6 @@ export function registerNavigationTools(server: ToolRegistrar): void {
       inputSchema: TabsSchema,
       annotations: { openWorldHint: true },
     },
-    tool(async (args: TabsArgs) =>
-      ok([text(await browser.tabs(args.action as TabAction, args.url))]),
-    ),
+    tool(async (args: TabsArgs) => ok([text(await browser.tabs(args.action, args.url))])),
   );
 }

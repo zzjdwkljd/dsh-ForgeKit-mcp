@@ -52,6 +52,11 @@ const WaitSchema = z.object({
     .describe('选择器目标状态'),
   timeoutMs: z.number().int().positive().optional().describe('选择器等待超时(毫秒)'),
   sleepMs: z.number().int().min(0).max(60000).optional().describe('无选择器时的睡眠(毫秒, 默认 1000)'),
+  script: z
+    .string()
+    .optional()
+    .describe('JS 表达式条件等待：轮询执行，返回 truthy 即成功（如 document.title 或 location.pathname==="/x"）。与 selector 互斥'),
+  pollMs: z.number().int().min(20).max(5000).optional().describe('条件等待轮询间隔(毫秒, 默认 250)'),
 });
 type WaitArgs = z.infer<typeof WaitSchema>;
 
@@ -155,11 +160,21 @@ export function registerInteractionTools(server: ToolRegistrar): void {
     'browser_wait',
     {
       title: '等待',
-      description: 'Wait for a selector to reach a state, or sleep for a number of milliseconds.',
+      description:
+        'Wait for a selector to reach a state, sleep for milliseconds, or poll a JS expression until it returns a truthy value (script mode: returns {satisfied, value, elapsedMs, polls}; expression errors count as falsy for that poll). Exactly one of selector / script; neither means sleep.',
       inputSchema: WaitSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     tool(async (args: WaitArgs) => {
+      const provided = (['selector', 'script'] as const).filter((k) => args[k] !== undefined);
+      if (provided.length > 1) throw new Error('Provide only one of selector / script.');
+      if (args.script !== undefined) {
+        return ok([text(await browser.waitForCondition({
+          script: args.script,
+          timeoutMs: args.timeoutMs,
+          pollMs: args.pollMs,
+        }))]);
+      }
       const opts: WaitOptions = {
         selector: args.selector,
         state: args.state,

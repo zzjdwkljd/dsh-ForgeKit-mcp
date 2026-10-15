@@ -47,7 +47,8 @@ export const screenshotModule: ToolModule = {
         description:
           'Capture screen(s) as PNG image(s). With monitor=all every display is captured and returned as a separate image.',
         inputSchema: ScreenSchema,
-        annotations: { readOnlyHint: true, openWorldHint: false },
+        // Writes a PNG into test/ (and may sweep expired screenshots), so it is not read-only.
+        annotations: { readOnlyHint: false, openWorldHint: false },
       },
       tool(async (args: ScreenArgs) => {
         const mode: MonitorMode = args.monitor;
@@ -66,7 +67,8 @@ export const screenshotModule: ToolModule = {
         description:
           'Capture a rectangular region (physical pixels of the virtual screen; negative coords allowed for monitors left/above primary).',
         inputSchema: RegionSchema,
-        annotations: { readOnlyHint: true, openWorldHint: false },
+        // Writes a PNG into test/ (and may sweep expired screenshots), so it is not read-only.
+        annotations: { readOnlyHint: false, openWorldHint: false },
       },
       tool(async (args: RegionArgs) => {
         const rect: RegionRect = args;
@@ -85,7 +87,8 @@ export const screenshotModule: ToolModule = {
         description:
           'Capture a specific application window. Locate it by title substring, app name substring and/or pid (AND combined); with no filter the focused window is captured. Use list_windows to discover targets.',
         inputSchema: WindowSchema,
-        annotations: { readOnlyHint: true, openWorldHint: true },
+        // Writes a PNG into test/ (and may sweep expired screenshots), so it is not read-only.
+        annotations: { readOnlyHint: false, openWorldHint: true },
       },
       tool(async (args: WindowArgs) => {
         const s = await shot.captureWindow({ title: args.title, app: args.app, pid: args.pid });

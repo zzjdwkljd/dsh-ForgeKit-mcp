@@ -36,23 +36,30 @@
 
 ## 兼容与已知边界
 
-- 25 个工具：截图/窗口 4 个，浏览器 21 个。保留工具名称、参数 schema、描述、注解及 handler 业务逻辑。
+- 29 个工具：截图/窗口 4 个，浏览器 24 个，Git Bash 会话 1 个。保留工具名称、参数 schema、描述、注解及 handler 业务逻辑。
 - 浏览器后端是进程级单例，不宣称多个工厂实例间已实现浏览器会话隔离；需要多个独立真实浏览器会话时，应先采用独立服务进程。
 - 完整桌面功能回归需在合适环境另行运行端到端测试。
 
 ## 验证记录
 
-验证环境：Windows，Node.js `v24.x`、npm `11.x`。
+验证环境：Windows，Node.js `v22.22.2`、npm `10.9.7`。
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm run typecheck` | 通过，退出码 0 |
-| 真实 stdio 客户端握手 | 返回 `forgekit-mcp` / `ForgeKit MCP` / `1.0.0` |
-| 现有工具完整声明对比 | 25 个工具与基线一致 |
-| 扩展机制 | 自定义模块独立运行、与内置模块组合、模块选择及重名拒绝通过 |
-| 资源管理 | 幂等关闭、逆序清理、清理失败继续回收、stdin EOF 退出通过 |
-| `npm pack --dry-run --json --ignore-scripts` | 未包含登录态、截图、测试数据、日志或依赖目录 |
+| `npm run typecheck` | 本机因 tsgo 环境问题不可执行（见下方排错）；在 C: 盘用同一编译器运行项目 tsconfig 通过，0 错误 |
+| `npm run build` | 同上，C: 盘执行通过，产出 `dist/` |
+| `npm test` | 50 项断言全部通过（契约一致性、副作用注解、模块回收、headers/data-paths/retention/humanize 纯函数） |
+| 契约一致性 | `test/contracts/tools.v1.json` 由 `npm run contract:update` 生成，与注册结果逐字段一致 |
+| 真实 stdio 客户端握手 | 返回 `forgekit-mcp` / `ForgeKit MCP` / 当前版本 |
+| `npm pack --dry-run --json --ignore-scripts` | 未包含登录态、截图、测试数据、日志或依赖目录；README 链接的两份文档已入白名单 |
 | 文档格式 | 使用 LF，无行尾空白 |
+
+### 排错：本机 typecheck 不可执行
+
+`typescript@7` 是 Go 原生编译器（tsgo），其平台二进制 `@typescript/typescript-win32-x64/lib/tsc.exe` 在 **D: 盘**加载 `bcrypt.dll` 时返回 `winapi error #5`（ACCESS_DENIED），进程在 `crypto/internal/backend/fips140.init()` 阶段 panic，`tsc --version` 亦失败。`node_modules/typescript/lib/tsc.js` 只是转发到该二进制，**没有 JS 回退路径**。
+
+- 这是机器级策略/环境问题，不是仓库缺陷：把同一二进制复制到 C: 盘运行，`-p tsconfig.json --noEmit` 退出码 0、覆盖 26 个 `.ts`、无任何诊断。
+- 规避方式：在 C: 盘或容器内执行 typecheck/build；或把 `typescript` 固定到 JS 实现的 5.x。
 
 内存传输会保留某些值为 `undefined` 的属性，契约测试按实际 JSON-RPC 的 JSON 形态进行对比，不忽略任何可序列化字段；同时运行真实 stdio 对比，以避免只靠内存测试得出结论。
 
